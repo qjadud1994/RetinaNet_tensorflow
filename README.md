@@ -13,13 +13,15 @@ CUDA_VISIBLE_DEVICES=0 python test.py
 ```
 
 ## Todo list:
+- [x] multi-gpu code
+- [x] Training visualize using Tensorboard
+- [x] validation output image visualization using Tensorboard
 - [x] Choose BatchNorm model or GroupNorm model
 - [x] Choose Trainable BatchNorm(not working!) or Freeze BatchNorm 
-- [x] validation infernece image visualization using Tensorboard
 - [x] (BatchNorm mode) Get Imagenet pre-trained weights from [pytorch-resnet50.pth](https://download.pytorch.org/models/resnet50-19c8e357.pth)
 - [x] (GroupNorm mode) Get Imagenet pre-trained weights from [resnet50_groupnorm32](http://www.cs.unc.edu/~cyfu/resnet50_groupnorm32.tar)
 - [ ] add evaluation (AP) code
-- [ ] change upsample function for 600 input
+- [ ] change upsample function for 600x600 input
 - [ ] Training/Validation Error ( % value)
 - [ ] add augmentation ( + random crop & rotate)
 - [ ] tf.train.batch -> tf.train.shuffle_batch
@@ -30,7 +32,7 @@ CUDA_VISIBLE_DEVICES=0 python test.py
 |train.py  |  Train RetinaNet            |
 |test.py |  Inference RetinaNet            |
 |tfrecord/tfrecord_VOC. py | Make VOC tfrecord |
-|Detector/layers. py | layer function used in RetinaNet  |
+|Detector/layers. py | layer functions used in RetinaNet  |
 |Detector/RetinaNet. py | Define RetinaNet |
 
 ## Environment
