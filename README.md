@@ -40,5 +40,5 @@ CUDA_VISIBLE_DEVICES=0 python test.py
 - os : Ubuntu 16.04.4 LTS <br>
 - GPU : Tesla P40 (24GB) <br>
 - Python : 3.6.6 <br>
-- pytorch : 0.3.1
-- CUDA, CUDNN : 9.0, 7.0.5 <br>
+- Tensorflow : 1.10.0
+- CUDA, CUDNN : 9.0, 7.1.3 <br>
