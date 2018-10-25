@@ -1,5 +1,5 @@
 # RetinaNet_tensorflow
-For easier and more readable tensorflow codes
+For easier and more readable tensorflow codes (On Working!!)
 
 ## How to use
 - For Trainig (recommend to use the default parameters)
