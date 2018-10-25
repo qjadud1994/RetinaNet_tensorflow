@@ -13,7 +13,11 @@ CUDA_VISIBLE_DEVICES=0 python test.py
 ```
 
 ## Todo list:
+- [x] Choose BatchNorm model or GroupNorm model
+- [x] Choose Trainable BatchNorm(not working!) or Freeze BatchNorm 
 - [x] validation infernece image visualization using Tensorboard
+- [x] (BatchNorm mode) Get Imagenet pre-trained weights from [pytorch-resnet50.pth](https://download.pytorch.org/models/resnet50-19c8e357.pth)
+- [x] (GroupNorm mode) Get Imagenet pre-trained weights from [resnet50_groupnorm32](http://www.cs.unc.edu/~cyfu/resnet50_groupnorm32.tar)
 - [ ] add evaluation (AP) code
 - [ ] change upsample function for 600 input
 - [ ] Training/Validation Error ( % value)
