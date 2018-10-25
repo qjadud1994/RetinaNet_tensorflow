@@ -443,8 +443,6 @@ def main(argv=None):
                                                save_summaries_steps=FLAGS.summary_steps,
                                                save_summaries_secs=None,) as sess:
             print("---------- open MonitoredTrainingSession")
-            #sess.graph._unsafe_unfinalize()
-            #net.load_pytorch_weight(sess)
             _step = sess.run(global_step)
 
             print("---------- run pretrain op")
@@ -464,12 +462,9 @@ def main(argv=None):
                 print('STEP : %d\tTRAIN_TOTAL_LOSS : %.8f\tTRAIN_LOC_LOSS : %.8f\tTRAIN_CLS_LOSS : %.5f'
                       % (_step, step_loc_loss + step_cls_loss, step_loc_loss, step_cls_loss), end='\r')
 
-                #assert not np.isnan(loc_losses + cls_losses), 'Model diverged with loss = NaN'
-
                 if _step % 50 == 0:
                     print('STEP : %d\tTRAIN_TOTAL_LOSS : %.8f\tTRAIN_LOC_LOSS : %.8f\tTRAIN_CLS_LOSS : %.5f'
                           % (_step, step_loc_loss + step_cls_loss, step_loc_loss, step_cls_loss))
-
 
                 # Periodic synchronization
                 if _step % 1000 == 0:
@@ -481,16 +476,6 @@ def main(argv=None):
                     print('STEP : %d\tTRAIN_TOTAL_LOSS : %.8f\tTRAIN_LOC_LOSS : %.8f\tTRAIN_CLS_LOSS : %.5f' 
                           % (_step, step_loc_loss + step_cls_loss, step_loc_loss, step_cls_loss))
 
-                    # Train Err / TODO: more search for Detection error
-                    '''
-                    cls_errors, loc_errors = [], []
-                    for gpu_indx in range(FLAGS.num_gpus):
-                        label_error, sequence_error = sess.run(tower_train_errs[gpu_indx])
-                        label_errors.append(label_error)
-                        sequence_errors.append(sequence_error)
-                    train_label_error = np.mean(label_errors)
-                    train_sequence_error = np.mean(sequence_errors)
-                    '''
                     # Validation Err
                     [valid_step_loc_loss, valid_step_cls_loss,  valid_summary] = sess.run([valid_tower_output.loc_loss, 
                                                                                            valid_tower_output.cls_loss, 
@@ -501,9 +486,7 @@ def main(argv=None):
                         best_model_dir = os.path.join(FLAGS.output, 'best_models')
                         valid_saver.save(_get_session(sess), os.path.join(best_model_dir,'model'), global_step=_step)
                     if valid_summary_writer is not None: valid_summary_writer.add_summary(valid_summary, _step)
-                    #print('STEP : %d\tTRAIN_LOSS : %f\tVALID_LOSS : %f' % (_step, step_loss, valid_step_loss))
-                    #print('TRAIN_LABEL_ERR : %f\tTRAIN_SEQ_ERR : %f' % (label_error, sequence_error))
-                    #print('VALID_LABEL_ERR : %f\tVALID_SEQ_ERR : %f' % (valid_label_error, valid_sequence_error))
+                      
                     print('STEP : %d\tVALID_TOTAL_LOSS : %.8f\tVALID_LOC_LOSS : %.8f\tVALID_CLS_LOSS : %.5f' 
                           % (_step, valid_step_loss, valid_step_loc_loss, valid_step_cls_loss))
                     print('='*70)
