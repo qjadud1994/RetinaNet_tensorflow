@@ -13,9 +13,9 @@ CUDA_VISIBLE_DEVICES=0 python test.py
 ```
 
 ## Todo list:
+- [x] validation infernece image visualization using Tensorboard
 - [ ] add evaluation (AP) code
 - [ ] change upsample function for 600 input
-- [ ] validation infernece image visualization using Tensorboard
 - [ ] Training/Validation Error ( % value)
 - [ ] add augmentation ( + random crop & rotate)
 - [ ] tf.train.batch -> tf.train.shuffle_batch
