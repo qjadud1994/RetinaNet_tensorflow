@@ -38,11 +38,11 @@ tf.app.flags.DEFINE_integer('max_detect', 300,
                             """num of max detect (using in nms)""")
 
 img_dir = "/root/DB/VOC/VOC2012/JPEGImages/"
-train_list = open("/root/DB/VOC/VOC2012/ImageSets/Main/train_14125.txt", "r").readlines()
-val_list = open("/root/DB/VOC/VOC2012/ImageSets/Main/val_3000.txt", "r").readlines()
+train_list = open("/root/DB/VOC/VOC2012/ImageSets/Main/train.txt", "r").readlines()
+val_list = open("/root/DB/VOC/VOC2012/ImageSets/Main/val.txt", "r").readlines()
 
 VOC = {1 : "motorbike", 2 : "car", 3 : "person", 4 : "bus", 5 : "bird", 6 : "horse", 7 : "bicycle", 8 : "chair", 9 : "aeroplane", 10 : "diningtable", 11 : "pottedplant", 12 : "cat", 13 : "dog", 14 : "boat", 15 : "sheep", 16 : "sofa", 17 : "cow", 18 : "bottle", 19 : "tvmonitor", 20 : "train"}
-#VOC = {1 : "aeroplane", 2 : "bicycle", 3 : "bird", 4 : "boat", 5 : "bottle", 6 : "bus", 7 : "car", 8 : "cat", 9 : "chair", 10 : "cow", 11 : "diningtable", 12 : "dog", 13 : "horse", 14 : "motorbike", 15 : "person", 16 : "pottedplant", 17 : "sheep", 18 : "sofa", 19 : "train", 20 : "tvmonitor"}
+
 mode = learn.ModeKeys.INFER
 
 def _get_init_pretrained(sess):
@@ -84,8 +84,6 @@ with tf.Graph().as_default():
 
         for n, _img in enumerate(val_list):
             _img = _img[:-1] + ".jpg"
-            #ori_img = cv2.imread(img_dir + _img)
-            #ori_img = cv2.cvtColor(ori_img, cv2.COLOR_BGR2RGB)
             ori_img = Image.open(img_dir + _img)
             print(ori_img.size)
             img = ori_img.copy()
