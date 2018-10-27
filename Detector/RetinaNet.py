@@ -45,6 +45,8 @@ class RetinaNet():
     def preprocess_image(self, image, boxes, is_train=True):
         """ pre-process / Augmentation """
         if is_train:
+            image, boxes, labels = distorted_bounding_box_crop(image, bboxes, labels)
+
             image, boxes = random_horizontal_flip(image, boxes)
             image, boxes = random_vertical_flip(image, boxes)
 
@@ -57,10 +59,12 @@ class RetinaNet():
             image = random_adjust_saturation(image)
 
         else:
+            image, boxes, labels = distorted_bounding_box_crop(image, bboxes, labels)
+
             image, boxes = resize_image_and_boxes(image, boxes, self.input_size)
             image = normalize_image(image)
 
-        return image, boxes
+        return image, boxes, labels
 
     def get_logits(self, inputs, mode, **kwargs):
         """Get RetinaNet logits(output)"""
@@ -257,7 +261,6 @@ class RetinaNet():
         return anchor_hw.reshape(num_fms, -1, 2)
 
     def _get_anchor_boxes(self):
-
         anchor_hw = self._get_anchor_hw()
         num_fms = len(self.anchor_areas)
         fm_sizes = [np.ceil(self.input_shape/pow(2.,i+3)) for i in range(num_fms)]  # p3 -> p7 feature map sizes
@@ -367,7 +370,7 @@ class RetinaNet():
                 _images, _bboxes, _labels = provider.get(['image', 'object/bbox', 'object/label'])
 
                 # pre-processing & encode
-                _images, _bboxes = self.preprocess_image(_images, _bboxes, is_train)
+                _images, _bboxes, _labels = self.preprocess_image(_images, _bboxes, _labels, is_train)
 
                 _bboxes, _labels = self.encode(_bboxes, _labels)
 
@@ -380,15 +383,3 @@ class RetinaNet():
 
                 input_features.append(InputFeatures(images, bboxes, labels))
         return input_features
-
-    '''
-    def get_test_input(self, batch_size):
-        InputFeatures = collections.namedtuple('InputFeatures', ('image', 'bboxes', 'labels'))
-        image = tf.placeholder(tf.uint8,
-                shape=[batch_size, FLAGS.input_size, FLAGS.input_size, 3], name='image')
-        bboxes = tf.placeholder(tf.float32, shape=[batch_size, 4], name='bbox')
-        labels = tf.placeholder(tf.int32, shape=[batch_size], name='labels')
-
-        input_feature = InputFeatures(image, bboxes, labels)
-        return input_feature
-    '''
