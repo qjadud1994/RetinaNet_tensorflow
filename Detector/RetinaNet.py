@@ -371,11 +371,12 @@ class RetinaNet():
 
                 _bboxes, _labels = self.encode(_bboxes, _labels)
 
-                images, bboxes, labels = tf.train.batch(
+                images, bboxes, labels = tf.train.shuffle_batch(
                     [_images, _bboxes, _labels],
                     batch_size=batch_size,
                     num_threads=FLAGS.num_input_threads,
-                    capacity=2 * batch_size)
+                    capacity=20*batch_size,
+                    min_after_dequeue=10*batch_size)
 
                 input_features.append(InputFeatures(images, bboxes, labels))
         return input_features
