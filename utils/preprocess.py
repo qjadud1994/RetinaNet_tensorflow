@@ -442,55 +442,135 @@ def random_jitter_boxes(boxes, ratio=0.05, seed=None):
         distorted_boxes = tf.reshape(distorted_boxes, boxes_shape)
 
         return distorted_boxes
+
     
-import random, math
-def random_crop(img, boxes):
-    '''Crop the given PIL image to a random size and aspect ratio.
+## Random Crop
 
-    A crop of random size of (0.08 to 1.0) of the original size and a random
-    aspect ratio of 3/4 to 4/3 of the original aspect ratio is made.
+def bboxes_resize(bbox_ref, bboxes, name=None):
+    """Resize bounding boxes based on a reference bounding box,
+    assuming that the latter is [0, 0, 1, 1] after transform. Useful for
+    updating a collection of boxes after cropping an image.
+    """
+    # Bboxes is dictionary.
+    if isinstance(bboxes, dict):
+        with tf.name_scope(name, 'bboxes_resize_dict'):
+            d_bboxes = {}
+            for c in bboxes.keys():
+                d_bboxes[c] = bboxes_resize(bbox_ref, bboxes[c])
+            return d_bboxes
 
+    # Tensors inputs.
+    with tf.name_scope(name, 'bboxes_resize'):
+        # Translate.
+        v = tf.stack([bbox_ref[0], bbox_ref[1], bbox_ref[0], bbox_ref[1]])
+        bboxes = bboxes - v
+        # Scale.
+        s = tf.stack([bbox_ref[2] - bbox_ref[0],
+                      bbox_ref[3] - bbox_ref[1],
+                      bbox_ref[2] - bbox_ref[0],
+                      bbox_ref[3] - bbox_ref[1]])
+        bboxes = bboxes / s
+        return bboxes
+
+    
+def bboxes_intersection(bbox_ref, bboxes, name=None):
+    """Compute relative intersection between a reference box and a
+    collection of bounding boxes. Namely, compute the quotient between
+    intersection area and box area.
     Args:
-      img: (PIL.Image) image to be cropped.
-      boxes: (tensor) object boxes, sized [#ojb,4].
-
+      bbox_ref: (N, 4) or (4,) Tensor with reference bounding box(es).
+      bboxes: (N, 4) Tensor, collection of bounding boxes.
+    Return:
+      (N,) Tensor with relative intersection.
+    """
+    with tf.name_scope(name, 'bboxes_intersection'):
+        # Should be more efficient to first transpose.
+        bboxes = tf.transpose(bboxes)
+        bbox_ref = tf.transpose(bbox_ref)
+        # Intersection bbox and volume.
+        int_ymin = tf.maximum(bboxes[0], bbox_ref[0])
+        int_xmin = tf.maximum(bboxes[1], bbox_ref[1])
+        int_ymax = tf.minimum(bboxes[2], bbox_ref[2])
+        int_xmax = tf.minimum(bboxes[3], bbox_ref[3])
+        h = tf.maximum(int_ymax - int_ymin, 0.)
+        w = tf.maximum(int_xmax - int_xmin, 0.)
+        # Volumes.
+        inter_vol = h * w
+        bboxes_vol = (bboxes[2] - bboxes[0]) * (bboxes[3] - bboxes[1])
+        #scores = tfe_math.safe_divide(inter_vol, bboxes_vol, 'intersection')
+        scores = inter_vol / bboxes_vol
+        return scores
+    
+def bboxes_filter_overlap(labels, bboxes, threshold=0.5,
+                          scope=None):
+    """Filter out bounding boxes based on overlap with reference
+    box [0, 0, 1, 1].
+    Return:
+      labels, bboxes: Filtered elements.
+    """
+    with tf.name_scope(scope, 'bboxes_filter', [labels, bboxes]):
+        scores = bboxes_intersection(tf.constant([0, 0, 1, 1], bboxes.dtype),
+                                     bboxes)
+        mask = scores > threshold
+        labels = tf.boolean_mask(labels, mask)
+        bboxes = tf.boolean_mask(bboxes, mask)
+        return labels, bboxes
+    
+def distorted_bounding_box_crop(image,
+                                bboxes,
+                                labels,
+                                min_object_covered=0.05,
+                                aspect_ratio_range=(0.8, 1.2),
+                                area_range=(0.1, 1.0),
+                                max_attempts=200,
+                                scope=None):
+    """Generates cropped_image using a one of the bboxes randomly distorted.
+    See `tf.image.sample_distorted_bounding_box` for more documentation.
+    Args:
+        image: 3-D Tensor of image (it will be converted to floats in [0, 1]).
+        bbox: 3-D float Tensor of bounding boxes arranged [1, num_boxes, coords]
+            where each coordinate is [0, 1) and the coordinates are arranged
+            as [ymin, xmin, ymax, xmax]. If num_boxes is 0 then it would use the whole
+            image.
+        min_object_covered: An optional `float`. Defaults to `0.1`. The cropped
+            area of the image must contain at least this fraction of any bounding box
+            supplied.
+        aspect_ratio_range: An optional list of `floats`. The cropped area of the
+            image must have an aspect ratio = width / height within this range.
+        area_range: An optional list of `floats`. The cropped area of the image
+            must contain a fraction of the supplied image within in this range.
+        max_attempts: An optional `int`. Number of attempts at generating a cropped
+            region of the image of the specified constraints. After `max_attempts`
+            failures, return the entire image.
+        scope: Optional scope for name_scope.
     Returns:
-      img: (PIL.Image) randomly cropped image.
-      boxes: (tensor) randomly cropped boxes.
-    '''
-    success = False
-    height, width, _ = tf.shape(img)
-    for attempt in range(10):
-        #area = img.size[0] * img.size[1]
-        area = height * width
-        target_area = random.uniform(0.56, 1.0) * area
-        aspect_ratio = random.uniform(3. / 4, 4. / 3)
+        A tuple, a 3-D Tensor cropped_image and the distorted bbox
+    """
+    bboxes = tf.clip_by_value(bboxes, 0.0, 1.0)
 
-        #w = int(round(math.sqrt(target_area * aspect_ratio)))
-        #h = int(round(math.sqrt(target_area / aspect_ratio)))
+    with tf.name_scope(scope, 'distorted_bounding_box_crop', [image, bboxes]):
+        # Each bounding box has shape [1, num_boxes, box coords] and
+        # the coordinates are ordered [ymin, xmin, ymax, xmax].
+        bbox_begin, bbox_size, distort_bbox = tf.image.sample_distorted_bounding_box(
+                tf.shape(image),
+                bounding_boxes=tf.expand_dims(bboxes, 0),
+                min_object_covered=min_object_covered,
+                aspect_ratio_range=aspect_ratio_range,
+                area_range=area_range,
+                max_attempts=max_attempts,
+                use_image_if_no_bounding_boxes=True)
+        distort_bbox = distort_bbox[0, 0]
 
-        w = tf.sqrt(target_area * aspect_ratio)
-        h = tf.sqrt(target_area / aspect_ratio)
+        # Crop the image to the specified bounding box.
+        cropped_image = tf.slice(image, bbox_begin, bbox_size)
+        # Restore the shape since the dynamic slice loses 3rd dimension.
+        cropped_image.set_shape([None, None, 3])
 
-        if random.random() < 0.5:
-            w, h = h, w
+        # Update bounding boxes: resize and filter out.
+        cropped_bboxes = bboxes_resize(distort_bbox, bboxes)
+        cropped_labels, cropped_bboxes = bboxes_filter_overlap(labels, cropped_bboxes)
+        
+        no_box = tf.equal(tf.shape(cropped_bboxes)[0], 0) # If there is no box in the image, it returns the original image.
+        image, bboxes, labels = tf.cond(no_box, lambda:(image, bboxes, labels), lambda:(cropped_image, cropped_bboxes, cropped_labels))
 
-        if w <= width and h <= height:
-            x = random.randint(0, width - w)
-            y = random.randint(0, height - h)
-            success = True
-            break
-
-    # Fallback
-    if not success:
-        w = h = min(width, height)
-        x = (width - w) // 2
-        y = (height - h) // 2
-
-    #img = img.crop((x, y, x+w, y+h))
-    img = img[x:x+w, y:y+h, :]
-
-    boxes -= [y,x,y,x]
-    #boxes[:,0::2].clamp_(min=0, max=w-1)
-    #boxes[:,1::2].clamp_(min=0, max=h-1)
-    return img, boxes
+        return image, bboxes, labels
