@@ -13,7 +13,9 @@ FLAGS = tf.app.flags.FLAGS
 slim = tf.contrib.slim
 resnet_version = {"resnet50": [3, 4, 6, 3],
                   "resnet101": [3, 4, 23, 3],
-                  "resnet152": [3, 8, 36, 3]}
+                  "resnet152": [3, 8, 36, 3],
+                  "se-resnet50": [3, 4, 6, 3],
+                  "se-resnet101": [3, 4, 23, 3]}
 
 class RetinaNet():
     def __init__(self, backbone, loss_fn=None):
@@ -24,6 +26,8 @@ class RetinaNet():
 
         assert backbone in resnet_version.keys()
         self.backbone = backbone
+
+        self.use_se_block = "se-resnet" in backbone
 
         self.input_size = FLAGS.input_size
         self.input_shape = np.array([self.input_size, self.input_size])
@@ -41,11 +45,17 @@ class RetinaNet():
         self.scale_ratios = [1., pow(2,1/3.), pow(2,2/3.)]
         self.num_anchors = len(self.aspect_ratios) * len(self.scale_ratios)
         self.anchor_boxes = self._get_anchor_boxes()
+        
+        print("backbone : ", self.backbone)
+        print("use_bn : ", self.use_bn)
+        print("use_se_block : ", self.use_se_block)
+        print("input_size : ", self.input_size)
+        print("num_classes : ", self.num_classes)
 
-    def preprocess_image(self, image, boxes, is_train=True):
+    def preprocess_image(self, image, boxes, labels, is_train=True):
         """ pre-process / Augmentation """
         if is_train:
-            image, boxes, labels = distorted_bounding_box_crop(image, bboxes, labels)
+            image, boxes, labels = distorted_bounding_box_crop(image, boxes, labels)
 
             image, boxes = random_horizontal_flip(image, boxes)
             image, boxes = random_vertical_flip(image, boxes)
@@ -59,7 +69,7 @@ class RetinaNet():
             image = random_adjust_saturation(image)
 
         else:
-            image, boxes, labels = distorted_bounding_box_crop(image, bboxes, labels)
+            image, boxes, labels = distorted_bounding_box_crop(image, boxes, labels)
 
             image, boxes = resize_image_and_boxes(image, boxes, self.input_size)
             image = normalize_image(image)
@@ -92,8 +102,6 @@ class RetinaNet():
     def resnet(self, inputs, mode, use_bn):
         """Build convolutional network layers attached to the given input tensor"""
         training = (mode == learn.ModeKeys.TRAIN) and not FLAGS.bn_freeze
-        print("MODE : ", training)
-        print("use bn : ", use_bn)
 
         blocks = resnet_version[self.backbone]
 
@@ -104,24 +112,24 @@ class RetinaNet():
             C1 = pool_layer(C1, (3, 3), stride=(2, 2))
 
             ## stage2
-            C2 = res_block(C1, [64, 64, 256], training, use_bn, strides=1, downsample=True)
+            C2 = res_block(C1, [64, 64, 256], training, use_bn, self.use_se_block, strides=1, downsample=True)
             for i in range(blocks[0] - 1):
-                C2 = res_block(C2, [64, 64, 256], training, use_bn)
+                C2 = res_block(C2, [64, 64, 256], training, use_bn, self.use_se_block)
 
             ## stage3
-            C3 = res_block(C2, [128, 128, 512], training, use_bn, strides=2, downsample=True)
+            C3 = res_block(C2, [128, 128, 512], training, use_bn, self.use_se_block, strides=2, downsample=True)
             for i in range(blocks[1] - 1):
-                C3 = res_block(C3, [128, 128, 512], training, use_bn)
+                C3 = res_block(C3, [128, 128, 512], training, use_bn, self.use_se_block)
 
             ## stage4
-            C4 = res_block(C3, [256, 256, 1024], training, use_bn, strides=2, downsample=True)
+            C4 = res_block(C3, [256, 256, 1024], training, use_bn, self.use_se_block, strides=2, downsample=True)
             for i in range(blocks[2] - 1):
-                C4 = res_block(C4, [256, 256, 1024], training, use_bn)
+                C4 = res_block(C4, [256, 256, 1024], training, use_bn, self.use_se_block)
 
             ## stage5
-            C5 = res_block(C4, [512, 512, 2048], training, use_bn, strides=2, downsample=True)
+            C5 = res_block(C4, [512, 512, 2048], training, use_bn, self.use_se_block, strides=2, downsample=True)
             for i in range(blocks[3] - 1):
-                C5 = res_block(C5, [512, 512, 2048], training, use_bn)
+                C5 = res_block(C5, [512, 512, 2048], training, use_bn, self.use_se_block)
 
             return [None, C1, C2, C3, C4, C5]
 
@@ -197,19 +205,6 @@ class RetinaNet():
             #focal_losses = alpha_t * tf.pow(1. - predictions_pt, gamma) * -tf.log(predictions_pt + epsilon)
             focal_losses = tf.reduce_sum(focal_losses, axis=1)
             return focal_losses
-            '''
-            #pt version : num_classes=20
-            gt_cls = tf.one_hot(gt_cls, FLAGS.num_classes+1, dtype=tf.float32)
-            gt_cls = gt_cls[:, 1:]  # remove background
-            x, t = preds_cls, gt_cls
-            xt = x * (2*t - 1)  # xt = x if t > 0 else -x
-
-            pt = tf.nn.sigmoid(2*xt + 1)
-
-            w = alpha * t + (1 - alpha) * (1 - t)
-            loss = -w * tf.log(pt) / 2
-            return tf.reduce_sum(loss, axis=1)
-            '''
 
         loc_preds, cls_preds = y_pred
         loc_gt, cls_gt = y_true
@@ -373,6 +368,12 @@ class RetinaNet():
                 _images, _bboxes, _labels = self.preprocess_image(_images, _bboxes, _labels, is_train)
 
                 _bboxes, _labels = self.encode(_bboxes, _labels)
+
+                #images, bboxes, labels = tf.train.batch(
+                #    [_images, _bboxes, _labels],
+                #    batch_size=batch_size,
+                #    num_threads=FLAGS.num_input_threads,
+                #    capacity=2 * batch_size)
 
                 images, bboxes, labels = tf.train.shuffle_batch(
                     [_images, _bboxes, _labels],
