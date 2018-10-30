@@ -1,109 +1,31 @@
 import tensorflow as tf
 from tensorflow.contrib import learn
 
-def se_block(bottom, name, ratio=16):
+def se_block(bottom, ratio=16):
     weight_initializer = tf.contrib.layers.variance_scaling_initializer()
     bias_initializer = tf.constant_initializer(value=0.0)
 
     # Bottom [N,H,W,C]
     # Global average pooling
-    with tf.variable_scope(name):
-        channel = bottom.get_shape()[-1]
-        se = tf.reduce_mean(bottom, axis=[1,2], keep_dims=True)
-        assert se.get_shape()[1:] == (1,1,channel)
-        se = tf.layers.dense(se, channel//ratio, activation=tf.nn.relu,
-                             kernel_initializer=weight_initializer,
-                             bias_initializer=bias_initializer,
-                             name='bottleneck_fc')
-        assert se.get_shape()[1:] == (1,1,channel//ratio)
-        se = tf.layers.dense(se, channel, activation=tf.nn.sigmoid,
-                             kernel_initializer=weight_initializer,
-                             bias_initializer=bias_initializer,
-                             name='recover_fc')
-        assert se.get_shape()[1:] == (1,1,channel)
-        top = bottom * se
+    #with tf.variable_scope("se_block"):
+
+    channel = bottom.get_shape()[-1]
+    se = tf.reduce_mean(bottom, axis=[1,2], keepdims=True)
+    assert se.get_shape()[1:] == (1,1,channel)
+    se = tf.layers.dense(se, channel//ratio, activation=tf.nn.relu,
+                         kernel_initializer=weight_initializer,
+                         bias_initializer=bias_initializer)
+    assert se.get_shape()[1:] == (1,1,channel//ratio)
+    se = tf.layers.dense(se, channel, activation=tf.nn.sigmoid,
+                         kernel_initializer=weight_initializer,
+                         bias_initializer=bias_initializer)
+    assert se.get_shape()[1:] == (1,1,channel)
+    top = bottom * se
+
     return top
 
 
-def residual_block(bottom, params, training, use_seblock=False):
-    # first layer (conv-bn-relu)
-    top = conv_layer(bottom, params[0], training)
-
-    # second layer (conv-bn-res-relu)
-    kernel_initializer = tf.contrib.layers.variance_scaling_initializer()
-    bias_initializer = tf.constant_initializer(value=0.0)
-
-    top = tf.layers.conv2d(top,
-                           filters=params[1][0],
-                           kernel_size=params[1][1],
-                           strides=(1,1),
-                           padding=params[1][2],
-                           activation=None,
-                           kernel_initializer=kernel_initializer,
-                           bias_initializer=bias_initializer,
-                           name=params[1][3])
-    top = norm_layer(top, training, params[1][3]+'/batch_norm')
-    if use_seblock:
-        top = se_block(top, params[1][3] + '/se_block')
-    top += bottom
-    top =  tf.nn.relu(top, name=params[1][3] + '/relu')
-    return top
-
-
-def res_identity_block(filters, training, use_bn):
-    """identity_block for resnet"""
-    def _res_identity_block(bottom):
-        # conv 1x1
-        path_1 = conv_layer(filters[0], 1)(bottom)
-        path_1 = norm_layer(path_1, training, use_bn)
-        path_1 = relu(path_1)
-
-        # conv 3x3
-        path_1 = conv_layer(filters[1], 3)(path_1)
-        path_1 = norm_layer(path_1, training, use_bn)
-        path_1 = relu(path_1)
-
-        # conv 1x1
-        path_1 = conv_layer(filters[2], 1)(path_1)
-        path_1 = norm_layer(path_1, training, use_bn)
-
-        # shortcut
-        top = path_1 + bottom
-        top = relu(top)
-
-        return top
-
-    return _res_identity_block
-
-
-def res_conv_block(filters, training, use_bn, strides=2):
-    """conv_block for resnet"""
-    def _res_conv_block(bottom):
-        # shortcut
-        path_2 = conv_layer(filters[2], 1, strides=strides)(bottom)
-        path_2 = norm_layer(path_2, training, use_bn)
-
-        # conv 1x1
-        path_1 = conv_layer(filters[0], 1)(bottom)
-        path_1 = norm_layer(path_1, training, use_bn)
-        path_1 = relu(path_1)   # activation?
-
-        # conv 3x3
-        path_1 = conv_layer(filters[1], 3, strides=strides)(path_1)
-        path_1 = norm_layer(path_1, training, use_bn)
-        path_1 = relu(path_1)
-
-        # conv 1x1
-        path_1 = conv_layer(filters[2], 1)(path_1)
-        path_1 = norm_layer(path_1, training, use_bn)
-
-        top = path_1 + path_2
-        top = relu(top)
-        return top
-
-    return _res_conv_block
-
-def res_block(bottom, filters, training, use_bn, strides=1, downsample=False):
+def res_block(bottom, filters, training, use_bn, use_se_block, strides=1, downsample=False):
 
     path_2 = bottom
 
@@ -120,6 +42,9 @@ def res_block(bottom, filters, training, use_bn, strides=1, downsample=False):
     # conv 1x1
     path_1 = conv_layer(path_1, filters[2], kernel_size=1)
     path_1 = norm_layer(path_1, training, use_bn)
+
+    if use_se_block:
+        path_1 = se_block(path_1)
 
     if downsample:
         # shortcut
