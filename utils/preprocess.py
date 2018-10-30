@@ -501,7 +501,7 @@ def bboxes_intersection(bbox_ref, bboxes, name=None):
         scores = inter_vol / bboxes_vol
         return scores
     
-def bboxes_filter_overlap(labels, bboxes, threshold=0.5,
+def bboxes_filter_overlap(labels, bboxes, threshold=0.3,
                           scope=None):
     """Filter out bounding boxes based on overlap with reference
     box [0, 0, 1, 1].
