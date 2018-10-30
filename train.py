@@ -12,6 +12,8 @@ slim = tf.contrib.slim
 FLAGS = tf.app.flags.FLAGS
 
 #### Input pipeline
+tf.app.flags.DEFINE_string('backbone', "se-resnet50",
+                            """select RetinaNet backbone""")
 tf.app.flags.DEFINE_integer('input_size', 608,
                             """Input size""")
 tf.app.flags.DEFINE_integer('batch_size', 8,
@@ -40,7 +42,7 @@ tf.app.flags.DEFINE_integer('valid_steps', 300,
                             """Validation steps""")
 
 #### Output Path
-tf.app.flags.DEFINE_string('output', 'logs_v2/new_momen3',
+tf.app.flags.DEFINE_string('output', 'logs_se/new_momen1',
                            """Directory for event logs and checkpoints""")
 #### Training config
 tf.app.flags.DEFINE_boolean('use_bn', True,
@@ -169,11 +171,14 @@ def _get_post_init_ops():
     # logger.info("'sync_variables_from_main_tower' includes {} operations.".format(len(post_init_ops)))
     return tf.group(*post_init_ops, name='sync_variables_from_main_tower')
 
-def load_pytorch_weight(use_bn):
+def load_pytorch_weight(use_bn, use_se_block):
     from torch import load
 
     if use_bn:
-        pt_load = load("weights/resnet50.pth")
+        if use_se_block:
+            pt_load = load("weights/se_resnet50-ce0d4300.pth")
+        else:
+            pt_load = load("weights/resnet50.pth")
     else:
         pt_load = load("weights/resnet50_groupnorm32.tar")['state_dict']
     reordered_weights = {}
@@ -189,22 +194,31 @@ def load_pytorch_weight(use_bn):
 
     tf_variables = [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="train_tower_0/resnet_model")]
 
-    if use_bn:
+    if use_bn:   # BatchNorm
         bn_variables = [v for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="train_tower_0/resnet_model") if
                         "moving_" in v.name]
         tf_counter = 0
         tf_bn_counter = 0
 
         for name in weight_names:
-            if "fc" in name:
+            if not use_se_block and "fc" in name:    # last fc layer (resnet)
+                continue
+            if use_se_block and "last_linear" in name:  # last fc layer(se-resnet)
                 continue
 
-            if len(reordered_weights[name].shape) == 4:  #conv
-                weight_var = reordered_weights[name]
-                tf_weight = tf_variables[tf_counter]
+            elif len(reordered_weights[name].shape) == 4:
+                if "se_module" in name: #se_block
+                    pt_assign = np.squeeze(reordered_weights[name])
+                    tf_assign = tf_variables[tf_counter]
 
-                pre_train_ops.append(tf_weight.assign(np.transpose(weight_var, (2, 3, 1, 0))))
-                tf_counter += 1
+                    pre_train_ops.append(tf_assign.assign(np.transpose(pt_assign)))
+                    tf_counter += 1
+                else: #conv
+                    weight_var = reordered_weights[name]
+                    tf_weight = tf_variables[tf_counter]
+
+                    pre_train_ops.append(tf_weight.assign(np.transpose(weight_var, (2, 3, 1, 0))))
+                    tf_counter += 1
 
             elif "running_" in name:  #bn mean, var
                 pt_assign = reordered_weights[name]
@@ -220,7 +234,7 @@ def load_pytorch_weight(use_bn):
                 pre_train_ops.append(tf_assign.assign(pt_assign))
                 tf_counter += 1
 
-    else:
+    else:  #GroupNorm
         conv_variables = [v for v in tf_variables if "conv" in v.name]
         #gamma_variables = [v for v in tf_variables if "gamma" in v.name]
         #beta_variables = [v for v in tf_variables if "beta" in v.name]
@@ -233,7 +247,7 @@ def load_pytorch_weight(use_bn):
             if "fc" in name:
                 continue
 
-            if len(reordered_weights[name].shape) == 4:  #conv
+            elif len(reordered_weights[name].shape) == 4:  #conv
                 weight_var = reordered_weights[name]
                 tf_weight = conv_variables[tf_conv_counter]
 
@@ -317,7 +331,7 @@ def main(argv=None):
         tf.summary.scalar('learning_rate', learning_rate)
 
         optimizers = []
-        net = RetinaNet("resnet50")
+        net = RetinaNet(FLAGS.backbone)
 
         # Multi gpu training code (Define graph)
         tower_grads = []
@@ -401,7 +415,7 @@ def main(argv=None):
         session_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
         init_op = tf.group(tf.global_variables_initializer(),
                            tf.local_variables_initializer())
-        pretrain_op = load_pytorch_weight(use_bn=FLAGS.use_bn)
+        pretrain_op = load_pytorch_weight(FLAGS.use_bn, net.use_se_block)
         sync_op = _get_post_init_ops()
 
         # only save global variables
@@ -443,6 +457,8 @@ def main(argv=None):
                                                save_summaries_steps=FLAGS.summary_steps,
                                                save_summaries_secs=None,) as sess:
             print("---------- open MonitoredTrainingSession")
+            #sess.graph._unsafe_unfinalize()
+            #net.load_pytorch_weight(sess)
             _step = sess.run(global_step)
 
             print("---------- run pretrain op")
@@ -462,9 +478,12 @@ def main(argv=None):
                 print('STEP : %d\tTRAIN_TOTAL_LOSS : %.8f\tTRAIN_LOC_LOSS : %.8f\tTRAIN_CLS_LOSS : %.5f'
                       % (_step, step_loc_loss + step_cls_loss, step_loc_loss, step_cls_loss), end='\r')
 
+                #assert not np.isnan(loc_losses + cls_losses), 'Model diverged with loss = NaN'
+
                 if _step % 50 == 0:
                     print('STEP : %d\tTRAIN_TOTAL_LOSS : %.8f\tTRAIN_LOC_LOSS : %.8f\tTRAIN_CLS_LOSS : %.5f'
                           % (_step, step_loc_loss + step_cls_loss, step_loc_loss, step_cls_loss))
+
 
                 # Periodic synchronization
                 if _step % 1000 == 0:
@@ -476,6 +495,16 @@ def main(argv=None):
                     print('STEP : %d\tTRAIN_TOTAL_LOSS : %.8f\tTRAIN_LOC_LOSS : %.8f\tTRAIN_CLS_LOSS : %.5f' 
                           % (_step, step_loc_loss + step_cls_loss, step_loc_loss, step_cls_loss))
 
+                    # Train Err / TODO: more search for Detection error
+                    '''
+                    cls_errors, loc_errors = [], []
+                    for gpu_indx in range(FLAGS.num_gpus):
+                        label_error, sequence_error = sess.run(tower_train_errs[gpu_indx])
+                        label_errors.append(label_error)
+                        sequence_errors.append(sequence_error)
+                    train_label_error = np.mean(label_errors)
+                    train_sequence_error = np.mean(sequence_errors)
+                    '''
                     # Validation Err
                     [valid_step_loc_loss, valid_step_cls_loss,  valid_summary] = sess.run([valid_tower_output.loc_loss, 
                                                                                            valid_tower_output.cls_loss, 
@@ -486,7 +515,9 @@ def main(argv=None):
                         best_model_dir = os.path.join(FLAGS.output, 'best_models')
                         valid_saver.save(_get_session(sess), os.path.join(best_model_dir,'model'), global_step=_step)
                     if valid_summary_writer is not None: valid_summary_writer.add_summary(valid_summary, _step)
-                      
+                    #print('STEP : %d\tTRAIN_LOSS : %f\tVALID_LOSS : %f' % (_step, step_loss, valid_step_loss))
+                    #print('TRAIN_LABEL_ERR : %f\tTRAIN_SEQ_ERR : %f' % (label_error, sequence_error))
+                    #print('VALID_LABEL_ERR : %f\tVALID_SEQ_ERR : %f' % (valid_label_error, valid_sequence_error))
                     print('STEP : %d\tVALID_TOTAL_LOSS : %.8f\tVALID_LOC_LOSS : %.8f\tVALID_CLS_LOSS : %.5f' 
                           % (_step, valid_step_loss, valid_step_loc_loss, valid_step_cls_loss))
                     print('='*70)
