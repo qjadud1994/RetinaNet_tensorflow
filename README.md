@@ -12,6 +12,10 @@ CUDA_VISIBLE_DEVICES=0,1 python train.py
 CUDA_VISIBLE_DEVICES=0 python test.py
 ```
 
+## Results
+
+![screensh](https://github.com/qjadud1994/RetinaNet_tensorflow/blob/master/results.PNG)
+
 ## Todo list:
 - [x] multi-gpu code
 - [x] Training visualize using Tensorboard
